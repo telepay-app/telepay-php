@@ -1,55 +1,99 @@
 <?php
 
-namespace TelePay;
+declare(strict_types=1);
 
-use TelePay\Exceptions\ApiException;
-use TelePay\Http\HttpClient;
+namespace Telepay;
+
+use GuzzleHttp\Client as Guzzle;
+use GuzzleHttp\Exception\RequestException;
+use Telepay\Exceptions\HttpException;
+use Telepay\Exceptions\TelepayException;
+use Telepay\Http\Signature;
 
 final class Client
 {
-public function __construct(private readonly Config $config, private readonly HttpClient $http) {}
+    private Guzzle $http;
+    private string $apiKey;
+    private string $secret;
+    private string $baseUrl;
 
-public static function from(Config $config): self
-{
-$http = HttpClient::make($config->getBaseUri(), $config->getApiKey(), $config->getTimeout());
-return new self($config, $http);
-}
+    public function __construct(
+        string $apiKey,
+        string $secret,
+        ?string $baseUrl = null,
+        ?Guzzle $httpClient = null
+    ) {
+        $this->apiKey  = $apiKey;
+        $this->secret  = $secret;
+        $this->baseUrl = rtrim($baseUrl ?? 'https://api.telepay.hu', '/');
 
-/** Create a payment transaction. */
-public function createTransaction(array $payload): array
-{
-$res = $this->http->post('/v1/transactions', $payload);
-return $this->jsonOrFail($res, 'Create transaction failed');
-}
+        $this->http = $httpClient ?? new Guzzle([
+            'base_uri' => $this->baseUrl,
+            'timeout'  => 10.0,
+        ]);
+    }
 
-/** Get a transaction by ID/UUID. */
-public function getTransaction(string $id): array
-{
-$res = $this->http->get("/v1/transactions/{$id}");
-return $this->jsonOrFail($res, 'Get transaction failed');
-}
+    /**
+     * /v1/transactions – SMS fizetés indítása.
+     *
+     * @param array       $payload Kötelező mezők: msisdn, description, success_message, currency, cart[…]
+     * @param string|null $idempotencyKey Opcionális idempotency
+     * @return array      Visszatérési tömb a JSON válaszból
+     *
+     * @throws TelepayException|HttpException
+     */
+    public function createTransaction(array $payload, ?string $idempotencyKey = null): array
+    {
+        $path = '/v1/transactions';
+        $method = 'POST';
 
-/** Optional helpers, if supported by your API */
-public function refundTransaction(string $id, array $payload = []): array
-{
-$res = $this->http->post("/v1/transactions/{$id}/refund", $payload);
-return $this->jsonOrFail($res, 'Refund failed');
-}
+        // Ugyanaz a JSON megy a body-ba és a signature-be
+        $rawBody = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($rawBody === false) {
+            throw new TelepayException('JSON encode hiba a payloadnál.');
+        }
 
-public function cancelTransaction(string $id): array
-{
-$res = $this->http->post("/v1/transactions/{$id}/cancel", []);
-return $this->jsonOrFail($res, 'Cancel failed');
-}
+        $ts = time();
+        $signature = Signature::sign($this->secret, $method, $path, $rawBody, $ts);
 
-private function jsonOrFail(\Psr\Http\Message\ResponseInterface $res, string $message): array
-{
-$code = $res->getStatusCode();
-$body = (string) $res->getBody();
-$json = json_decode($body, true);
-if ($code >= 400) {
-throw new ApiException($message, $code, is_array($json) ? $json : null);
-}
-return is_array($json) ? $json : [];
-}
+        $headers = [
+            'Content-Type'         => 'application/json',
+            'X-Telepay-Key'        => $this->apiKey,
+            'X-Telepay-Timestamp'  => (string) $ts,
+            'X-Telepay-Signature'  => $signature,
+        ];
+
+        if ($idempotencyKey) {
+            $headers['X-Idempotency-Key'] = $idempotencyKey;
+        }
+
+        try {
+            $res = $this->http->request($method, $path, [
+                'headers' => $headers,
+                // Fontos: raw body megy, NEM az 'json' opció, hogy a signature ugyanarra a raw stringre érvényes legyen
+                'body'    => $rawBody,
+            ]);
+        } catch (RequestException $e) {
+            if ($e->hasResponse()) {
+                $status = $e->getResponse()->getStatusCode();
+                $body   = (string) $e->getResponse()->getBody();
+                throw new HttpException($status, $body, "TelePay API HTTP $status");
+            }
+            throw new TelepayException($e->getMessage(), $e->getCode(), $e);
+        }
+
+        $body = (string) $res->getBody();
+        $data = json_decode($body, true);
+
+        if ($data === null && $body !== 'null' && $body !== '') {
+            throw new TelepayException('Váratlan válasz: nem JSON.');
+        }
+
+        return $data ?? [];
+    }
+
+    public function getBaseUrl(): string
+    {
+        return $this->baseUrl;
+    }
 }
