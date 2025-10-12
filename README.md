@@ -1,10 +1,9 @@
-# TelePay PHP SDK (Core)
+# telepay-app/telepay-php
 
+Minimal PHP kliens a TelePay Transaction API-hoz.
 
-Framework-agnostic SDK to call TelePay API.
+## Telepítés
 
-
-## Install
 ```bash
 composer require telepay-app/telepay-php
 ```
@@ -12,38 +11,24 @@ composer require telepay-app/telepay-php
 
 ## Usage
 ```php
-use TelePay\Config;
-use TelePay\Client;
+use Telepay\Client;
 
-
-$config = new Config(
-baseUri: 'https://api.telepay.hu',
-apiKey: 'your_api_key',
-timeout: 15,
+$client = new Client(
+    apiKey: 'PUBLIC_API_KEY',
+    secret: 'SECRET',
+    baseUrl: 'https://api.telepay.hu' // sandbox: https://api.sandbox.telepay.hu
 );
 
+$payload = [
+  'msisdn' => '+36301234567',
+  'description' => 'XYZ termék neve',
+  'success_message' => 'Köszönjük a vásárlást!',
+  'currency' => 'HUF',
+  'cart' => [
+    ['name' => 'Teszt termék', 'price' => 3000, 'quantity' => 1]
+  ]
+];
 
-$client = Client::from($config);
-
-
-// Create transaction
-$tx = $client->createTransaction([
-'amount' => 19900,
-'currency' => 'HUF',
-'order_id' => 'ORD-1234',
-'callback_url' => 'https://example.com/api/telepay/webhook',
-'return_url' => 'https://example.com/return'
-]);
-
-
-// Get transaction
-$tx = $client->getTransaction($tx['id'] ?? 'tx_123');
+$response = $client->createTransaction($payload, idempotencyKey: 'order-12345');
+print_r($response);
 ```
-
-
-## Exceptions
-- `TelePay\\Exceptions\\ApiException` is thrown on non-2xx responses, with `status` and decoded `body`.
-
-
-## License
-MIT
