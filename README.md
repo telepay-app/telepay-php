@@ -16,9 +16,9 @@ use Telepay\Client;
 $client = new Client(
     apiKey: 'PUBLIC_API_KEY',
     secret: 'SECRET',
-    baseUrl: 'https://api.telepay.hu' // sandbox: https://api.sandbox.telepay.hu
 );
 
+// 💳 Új tranzakció létrehozása
 $payload = [
   'msisdn' => '+36301234567',
   'description' => 'XYZ termék neve',
@@ -29,6 +29,10 @@ $payload = [
   ]
 ];
 
-$response = $client->createTransaction($payload, idempotencyKey: 'order-12345');
+$response = $client->createTransaction($payload);
+print_r($response);
+
+// 🧾 Teljes refund indítása
+$response = $client->refundTransaction('txn_123456');
 print_r($response);
 ```
