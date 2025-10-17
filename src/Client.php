@@ -92,6 +92,54 @@ final class Client
         return $data ?? [];
     }
 
+     /**
+     * /v1/transactions/{id}/refund – Teljes visszatérítés indítása.
+     *
+     * @param string $transactionId A tranzakció azonosítója
+     * @return array
+     *
+     * @throws TelepayException|HttpException
+     */
+    public function refundTransaction(string $transactionId): array
+    {
+        $path = "/v1/transactions/{$transactionId}/refund";
+        $method = 'POST';
+        $rawBody = ''; // teljes refund esetén üres body
+
+        $ts = time();
+        $signature = Signature::sign($this->secret, $method, $path, $rawBody, $ts);
+
+        $headers = [
+            'Content-Type'         => 'application/json',
+            'X-Telepay-Key'        => $this->apiKey,
+            'X-Telepay-Timestamp'  => (string) $ts,
+            'X-Telepay-Signature'  => $signature,
+        ];
+
+        try {
+            $res = $this->http->request($method, $path, [
+                'headers' => $headers,
+                'body'    => $rawBody, // aláírás és body egyezzen
+            ]);
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            if ($e->hasResponse()) {
+                $status = $e->getResponse()->getStatusCode();
+                $body   = (string) $e->getResponse()->getBody();
+                throw new HttpException($status, $body, "TelePay API HTTP $status");
+            }
+            throw new TelepayException($e->getMessage(), $e->getCode(), $e);
+        }
+
+        $body = (string) $res->getBody();
+        $data = json_decode($body, true);
+
+        if ($data === null && $body !== 'null' && $body !== '') {
+            throw new TelepayException('Váratlan válasz: nem JSON.');
+        }
+
+        return $data ?? [];
+    }
+    
     public function getBaseUrl(): string
     {
         return $this->baseUrl;
