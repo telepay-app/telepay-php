@@ -139,7 +139,54 @@ final class Client
 
         return $data ?? [];
     }
-    
+
+    /**
+     * /v1/transactions/{id} – Tranzakció lekérdezése a visszatérítés(ek)kel együtt.
+     *
+     * @param string $transactionId A tranzakció azonosítója (uuid)
+     * @return array A tranzakció mezői + 'refunded' (bool) és 'refunds' (tömb).
+     *
+     * @throws TelepayException|HttpException
+     */
+    public function getTransaction(string $transactionId): array
+    {
+        $path = "/v1/transactions/{$transactionId}";
+        $method = 'GET';
+        $rawBody = ''; // GET: nincs body, az aláírás üres body-ra megy
+
+        $ts = time();
+        $signature = Signature::sign($this->secret, $method, $path, $rawBody, $ts);
+
+        $headers = [
+            'Content-Type'         => 'application/json',
+            'X-Telepay-Key'        => $this->apiKey,
+            'X-Telepay-Timestamp'  => (string) $ts,
+            'X-Telepay-Signature'  => $signature,
+        ];
+
+        try {
+            $res = $this->http->request($method, $path, [
+                'headers' => $headers,
+            ]);
+        } catch (RequestException $e) {
+            if ($e->hasResponse()) {
+                $status = $e->getResponse()->getStatusCode();
+                $body   = (string) $e->getResponse()->getBody();
+                throw new HttpException($status, $body, "TelePay API HTTP $status");
+            }
+            throw new TelepayException($e->getMessage(), $e->getCode(), $e);
+        }
+
+        $body = (string) $res->getBody();
+        $data = json_decode($body, true);
+
+        if ($data === null && $body !== 'null' && $body !== '') {
+            throw new TelepayException('Váratlan válasz: nem JSON.');
+        }
+
+        return $data ?? [];
+    }
+
     public function getBaseUrl(): string
     {
         return $this->baseUrl;
